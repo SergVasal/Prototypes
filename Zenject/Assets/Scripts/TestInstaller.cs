@@ -5,15 +5,45 @@ public class TestInstaller : MonoInstaller
 {
     public override void InstallBindings()
     {
-        Container.Bind<Greeter>().AsSingle().NonLazy();
+        //Container.Bind<Greeter>().AsSingle().NonLazy();
+
+        Container.Bind<Greeter>().To<Greeter>().AsSingle().NonLazy();
+
+        var foo = new Foo();
+        Container.Bind<Foo>().FromInstance(foo);
+        Container.QueueForInject(foo);
         Container.Bind<string>().FromInstance("Hello World!");
     }
 }
 
-public class Greeter
+public class Greeter : IInitializable
 {
-    public Greeter(string message)
+    [Inject]
+    private string injectedString;
+
+    public float Number { get; } = 5f;
+
+    public Greeter(Foo foo)
     {
-        Debug.Log(message);
+        foo.Start();
+        Debug.Log($"Greeter Constructor injectedString: {injectedString}");
+
     }
+
+    public void Initialize()
+    {
+        Debug.Log($"Initialize!!!");
+    }
+}
+
+public class Foo
+{
+    [Inject]
+    private string injectedString;
+
+    public void Start()
+    {
+        Debug.Log($"Start Foo injectedString is null: {injectedString}");
+    }
+
 }
