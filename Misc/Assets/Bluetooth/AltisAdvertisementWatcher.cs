@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using wclBluetooth;
@@ -14,6 +15,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private Dictionary<long, DiscoveredDeviceInfo> discoveredDevices = new Dictionary<long, DiscoveredDeviceInfo>();
     private List<Task> deviceUpdateTasks = new List<Task>();
     private List<wclRfCommClient> clients = new List<wclRfCommClient>();
+    private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 
     private void Start()
     {
@@ -37,18 +39,26 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         bluetoothManager.GetRadio(out var bluetoothRadio);
 
-        bluetoothRadio.Discover(20, wclBluetoothDiscoverKind.dkClassic);
+        bluetoothRadio.Discover(50, wclBluetoothDiscoverKind.dkClassic);
     }
 
     private void OnDisable()
     {
         Debug.LogWarning($"Disable!");
+
+        cancellationTokenSource.Cancel();
+        cancellationTokenSource.Dispose();
+
+        Task.Run(() =>
+        {
+            foreach (var client in clients)
+            {
+                client.Disconnect();
+            }
+        });
+
         bluetoothManager.Close();
 
-        foreach (var client in clients)
-        {
-            client.Disconnect();
-        }
     }
 
     private void PinRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out string Pin)
@@ -97,7 +107,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.Log($"Found device with address: {address.ToString("X12")}");
         var discoveredDevice = new KeyValuePair<long, DiscoveredDeviceInfo>(address, new DiscoveredDeviceInfo());
         discoveredDevices.Add(discoveredDevice.Key, discoveredDevice.Value);
-        deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value)));
+        deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
@@ -147,6 +157,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.LogWarning($"Driver install for service: {service.Name}, channel: {service.Channel} result: {driverInstallResult.ToString("X8")}");
 
         var deviceClient = new wclRfCommClient();
+        clients.Add(deviceClient);
 
         deviceClient.Address = audioDeviceAddress;
         deviceClient.Authentication = false;
