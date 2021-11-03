@@ -12,17 +12,22 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private wclBluetoothManager bluetoothManager;
     private Dictionary<long, DiscoveredDeviceInfo> discoveredDevices = new Dictionary<long, DiscoveredDeviceInfo>();
-    List<Task> deviceUpdateTasks = new List<Task>();
+    private List<Task> deviceUpdateTasks = new List<Task>();
+    private List<wclRfCommClient> clients = new List<wclRfCommClient>();
 
     private void Start()
     {
         bluetoothManager = new wclBluetoothManager();
 
+        bluetoothManager.OnPinRequest += PinRequestHandler;
         bluetoothManager.OnPasskeyRequest += PasskeyRequestHandler;
         bluetoothManager.OnNumericComparison += NumericComparisonHandler;
         bluetoothManager.OnIoCapabilityRequest += IoCapabilityRequestHandler;
         bluetoothManager.OnDeviceFound += DeviceFoundHandler;
         bluetoothManager.OnDiscoveringCompleted += DiscoveringCompletedHandler;
+        bluetoothManager.OnConfirm += ConfirmHandler;
+        bluetoothManager.OnOobDataRequest += OobDataRequestHandler;
+        bluetoothManager.OnProtectionLevelRequest += ProtectionLevelRequestHandler;
 
         var openResult = bluetoothManager.Open();
         if (openResult != wclErrors.WCL_E_SUCCESS)
@@ -35,9 +40,20 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         bluetoothRadio.Discover(20, wclBluetoothDiscoverKind.dkClassic);
     }
 
-    private void OnDestroy()
+    private void OnDisable()
     {
+        Debug.LogWarning($"Disable!");
         bluetoothManager.Close();
+
+        foreach (var client in clients)
+        {
+            client.Disconnect();
+        }
+    }
+
+    private void PinRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out string Pin)
+    {
+        Pin = "0000";
     }
 
     private void NumericComparisonHandler(object Sender, wclBluetoothRadio Radio, long Address, uint Number, out bool Confirm)
@@ -48,6 +64,22 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private void PasskeyRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out uint Passkey)
     {
         Passkey = 123456;
+    }
+
+    void ConfirmHandler(object Sender, wclBluetoothRadio Radio, long Address, out bool Confirm)
+    {
+        Confirm = true;
+    }
+
+    void OobDataRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out wclBluetoothOobData OobData)
+    {
+        // This event fires when a remote device requests OOB data.
+        OobData = null;
+    }
+
+    private void ProtectionLevelRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out wclBluetoothleProtectionLevel Protection)
+    {
+        Protection = wclBluetoothleProtectionLevel.pplDefault;
     }
 
     private void IoCapabilityRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out wclBluetoothMitmProtection Mitm, out wclBluetoothIoCapability IoCapability, out bool OobPresent)
@@ -68,10 +100,15 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value)));
     }
 
-    private async void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
+    private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
     {
         Debug.Log($"Radio: {radio} DiscoveringCompleted, Error: {error.ToString()}");
 
+        Task.Run(() => ConnectToDevice(radio));
+    }
+
+    private async void ConnectToDevice(wclBluetoothRadio radio)
+    {
         if (discoveredDevices.Count == 0)
         {
             Debug.Log($"There are no devices discovered!");
@@ -93,30 +130,60 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         if (!closestAudioDevice.Equals(default(KeyValuePair<long, DiscoveredDeviceInfo>)))
         {
             Debug.LogWarning($"ClosestAudioDevice Audio device: {closestAudioDevice.Value.DeviceName}");
+
+            var pairingResult = radio.RemotePair(closestAudioDevice.Key);
+            Debug.LogWarning($"{pairingResult.ToString("X8")}");
+
+            foreach (var service in closestAudioDevice.Value.Services)
+            {
+                ConnectToService(radio, closestAudioDevice.Key, service);
+            }
         }
+    }
 
-        var pairingResult = radio.RemotePair(closestAudioDevice.Key);
-        Debug.LogWarning(pairingResult.ToString("x8"));
+    private void ConnectToService(wclBluetoothRadio radio, long audioDeviceAddress, wclBluetoothService service)
+    {
+        var driverInstallResult = radio.InstallDevice(audioDeviceAddress, service.Uuid);
+        Debug.LogWarning($"Driver install for service: {service.Name}, channel: {service.Channel} result: {driverInstallResult.ToString("X8")}");
 
-        // install the services
+        var deviceClient = new wclRfCommClient();
+
+        deviceClient.Address = audioDeviceAddress;
+        deviceClient.Authentication = false;
+        deviceClient.Encryption = false;
+        deviceClient.Timeout = 20;
+
+        deviceClient.Channel = service.Channel;
+        deviceClient.Service = service.Uuid;
+
+        var connectionResult = deviceClient.Connect(radio);
+        Debug.LogWarning($"Connection to service: {service.Name}, channel: {service.Channel} result: {connectionResult.ToString("X8")}");
     }
 
     private void UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredDeviceInfo discoveredDeviceInfo)
     {
-        radio.GetRemoteName(deviceAddress, out var deviceName);
-        discoveredDeviceInfo.DeviceName = deviceName;
-
+        Debug.Log($"Start updating device info!");
         radio.GetRemoteCod(deviceAddress, out var remoteClassOfDevice);
         discoveredDeviceInfo.ClassOfDevice = remoteClassOfDevice.ToString("x8");
 
-        radio.GetRemoteRssi(deviceAddress, out var rssi);
-        discoveredDeviceInfo.RSSI = rssi;
+        if (discoveredDeviceInfo.ClassOfDevice.Contains(AudioDevicesClass))
+        {
+            radio.GetRemoteName(deviceAddress, out var deviceName);
+            discoveredDeviceInfo.DeviceName = deviceName;
 
-        Guid g = Guid.Empty;
-        radio.EnumRemoteServices(deviceAddress, g, out var services);
-        discoveredDeviceInfo.Services = services;
+            radio.GetRemoteRssi(deviceAddress, out var rssi);
+            discoveredDeviceInfo.RSSI = rssi;
 
-        Debug.LogWarning($"Device info updated for {deviceName} ClassOfDevice: {discoveredDeviceInfo.ClassOfDevice}, RSSI: {discoveredDeviceInfo.RSSI}");
+            Guid g = Guid.Empty;
+            radio.EnumRemoteServices(deviceAddress, g, out var services);
+            discoveredDeviceInfo.Services = services;
+
+            Debug.LogWarning($"Device info updated for {deviceName} ClassOfDevice: {discoveredDeviceInfo.ClassOfDevice}, RSSI: {discoveredDeviceInfo.RSSI} services: {services}");
+        }
+        else
+        {
+            Debug.LogWarning($"Non-relevant Class of Device!");
+        }
     }
 }
 
