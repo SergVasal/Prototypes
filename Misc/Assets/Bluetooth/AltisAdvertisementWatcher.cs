@@ -12,13 +12,14 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private const string AudioDevicesClass = "2404";
 
     private wclBluetoothManager bluetoothManager;
+    private wclBluetoothRadio bluetoothRadio;
     private wclPowerEventsMonitor FPowerMonitor;
 
     private Dictionary<long, DiscoveredAudioDeviceInfo> discoveredAudioDevices = new Dictionary<long, DiscoveredAudioDeviceInfo>();
     private KeyValuePair<long, DiscoveredAudioDeviceInfo> selectedDevice;
 
     private List<wclRfCommClient> clients = new List<wclRfCommClient>();
-    private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
+    private CancellationTokenSource updateDevicesCancellationTokenSource = new CancellationTokenSource();
 
     private Boolean WasOpened = false;
 
@@ -46,7 +47,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             Debug.LogError(openResult.ToString("X8"));
         }
 
-        bluetoothManager.GetRadio(out var bluetoothRadio);
+        bluetoothManager.GetRadio(out bluetoothRadio);
 
         Int32 Res = bluetoothRadio.Discover(60, wclBluetoothDiscoverKind.dkClassic);
         if (Res != wclErrors.WCL_E_SUCCESS)
@@ -57,8 +58,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     {
         Debug.LogWarning($"Disable!");
 
-        cancellationTokenSource.Cancel();
-        cancellationTokenSource.Dispose();
+        updateDevicesCancellationTokenSource.Cancel();
+        updateDevicesCancellationTokenSource.Dispose();
 
         // Task.Run(() =>
         // {
@@ -122,8 +123,15 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     {
         if (Input.GetKeyDown(KeyCode.Space))
         {
-            Debug.LogWarning($"Cancel!");
-            cancellationTokenSource.Cancel();
+            Debug.LogWarning($"Cancel key pressed!");
+            updateDevicesCancellationTokenSource.Cancel();
+        }
+
+        if (Input.GetKeyDown(KeyCode.C))
+        {
+            Debug.LogWarning($"Pair key pressed!");
+            updateDevicesCancellationTokenSource.Cancel();
+            PairWithSelectedDevice();
         }
     }
 
@@ -138,7 +146,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             var discoveredAudioDevice = new KeyValuePair<long, DiscoveredAudioDeviceInfo>(address, new DiscoveredAudioDeviceInfo());
             discoveredAudioDevices.Add(discoveredAudioDevice.Key, discoveredAudioDevice.Value);
 
-            Task.Run(() => UpdateDeviceInfo(radio, discoveredAudioDevice.Key, discoveredAudioDevice.Value), cancellationTokenSource.Token).ContinueWith(t =>
+            Task.Run(() => UpdateDeviceInfo(radio, discoveredAudioDevice.Key, discoveredAudioDevice.Value), updateDevicesCancellationTokenSource.Token).ContinueWith(t =>
             {
                 if (t.Exception != null)
                 {
@@ -156,7 +164,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         discoveredAudioDeviceInfo.DeviceName = deviceName;
         Debug.Log($"GetRemoteName {deviceName}!");
 
-        if (cancellationTokenSource.IsCancellationRequested)
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
         {
             Debug.LogWarning($"UpdateDeviceInfo Cancel!");
 
@@ -168,7 +176,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.Log($"GetRemoteRssi {rssi} deviceName: {deviceName}!");
         UpdateSelectedDevice();
 
-        if (cancellationTokenSource.IsCancellationRequested)
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
         {
             Debug.LogWarning($"UpdateDeviceInfo Cancel!");
 
@@ -180,7 +188,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.Log($"IsRemoteDeviceInRange {isInRange}! deviceName: {deviceName}");
         UpdateSelectedDevice();
 
-        if (cancellationTokenSource.IsCancellationRequested)
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
         {
             Debug.LogWarning($"UpdateDeviceInfo Cancel!");
 
@@ -194,7 +202,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         Debug.Log($"EnumRemoteServices {services}! deviceName: {deviceName}");
 
-        if (cancellationTokenSource.IsCancellationRequested)
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
         {
             Debug.LogWarning($"UpdateDeviceInfo Cancel!");
 
@@ -202,9 +210,9 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         }
 
         Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} isInRange: {isInRange} services: {services}");
-        await Task.Delay(TimeSpan.FromSeconds(3), cancellationTokenSource.Token).ContinueWith(tsk => {});
+        await Task.Delay(TimeSpan.FromSeconds(3), updateDevicesCancellationTokenSource.Token).ContinueWith(tsk => {});
 
-        if (cancellationTokenSource.IsCancellationRequested)
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
         {
             Debug.LogWarning($"UpdateDeviceInfo Cancel!");
 
@@ -228,49 +236,40 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             return;
         }
 
-        var closestAudioDevice = selectedDevices.OrderByDescending(x => x.Value.RSSI).FirstOrDefault();
-        Debug.LogWarning($"CLOSEST AUDIO DEVICE is {closestAudioDevice.Value.DeviceName}");
+        selectedDevice = selectedDevices.OrderByDescending(x => x.Value.RSSI).FirstOrDefault();
+        Debug.LogWarning($"SELECTED DEVICE is {selectedDevice.Value.DeviceName}");
+    }
+
+    private void PairWithSelectedDevice()
+    {
+        if (selectedDevice.Equals(default(KeyValuePair<long, DiscoveredAudioDeviceInfo>)))
+        {
+            Debug.LogError($"NO SELECTED DEVICE TO PAIR WITH!");
+            return;
+        }
+
+        Debug.LogWarning($"Start pairing with selected device {selectedDevice.Value.DeviceName} with address {selectedDevice.Key}");
+
+        var pairingResult = bluetoothRadio.RemotePair(selectedDevice.Key);
+        if (pairingResult != wclErrors.WCL_E_SUCCESS)
+        {
+            Debug.LogError($"Error pairing with device. Error code: {pairingResult.ToString("X8")}");
+        }
+        else
+        {
+            Debug.Log($"Pairing completed successfully!");
+        }
+
+
+        // foreach (var service in closestAudioDevice.Value.Services)
+        // {
+        //     ConnectToService(radio, closestAudioDevice.Key, service);
+        // }
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
     {
         Debug.Log($"DiscoveringCompleted, Error: {error.ToString("X8")}");
-
-        //Task.Run(() => ConnectToDevice(radio));
-
-
-    }
-
-    private async void ConnectToDevice(wclBluetoothRadio radio)
-    {
-        if (discoveredAudioDevices.Count == 0)
-        {
-            Debug.Log($"There are no devices discovered!");
-            return;
-        }
-
-        var audioDevices = discoveredAudioDevices
-            .Where(x => x.Value.Services != null)
-            .ToList();
-
-        foreach (var audioDevice in audioDevices)
-        {
-            Debug.LogWarning($"Audio device: {audioDevice.Value.DeviceName}");
-        }
-
-        var closestAudioDevice = audioDevices.OrderByDescending(x => x.Value.RSSI).FirstOrDefault();
-        if (!closestAudioDevice.Equals(default(KeyValuePair<long, DiscoveredAudioDeviceInfo>)))
-        {
-            Debug.LogWarning($"ClosestAudioDevice Audio device: {closestAudioDevice.Value.DeviceName}");
-
-            var pairingResult = radio.RemotePair(closestAudioDevice.Key);
-            Debug.LogWarning($"{pairingResult.ToString("X8")}");
-
-            foreach (var service in closestAudioDevice.Value.Services)
-            {
-                ConnectToService(radio, closestAudioDevice.Key, service);
-            }
-        }
     }
 
     private void ConnectToService(wclBluetoothRadio radio, long audioDeviceAddress, wclBluetoothService service)
