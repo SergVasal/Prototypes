@@ -14,7 +14,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private wclBluetoothManager bluetoothManager;
     private wclPowerEventsMonitor FPowerMonitor;
 
-    private Dictionary<long, DiscoveredDeviceInfo> discoveredDevices = new Dictionary<long, DiscoveredDeviceInfo>();
+    private Dictionary<long, DiscoveredAudioDeviceInfo> discoveredAudioDevices = new Dictionary<long, DiscoveredAudioDeviceInfo>();
     private List<Task> deviceUpdateTasks = new List<Task>();
     private List<wclRfCommClient> clients = new List<wclRfCommClient>();
     private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
@@ -47,7 +47,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         bluetoothManager.GetRadio(out var bluetoothRadio);
 
-        Int32 Res = bluetoothRadio.Discover(Convert.ToByte(50), wclBluetoothDiscoverKind.dkClassic);
+        Int32 Res = bluetoothRadio.Discover(60, wclBluetoothDiscoverKind.dkClassic);
         if (Res != wclErrors.WCL_E_SUCCESS)
             Debug.LogError(Res.ToString("X8"));
     }
@@ -123,8 +123,13 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         var classOfDevice = remoteClassOfDevice.ToString("x8");
         Debug.Log($"Found device with address: {address.ToString("X12")}, class of device: {classOfDevice}");
 
-        var discoveredDevice = new KeyValuePair<long, DiscoveredDeviceInfo>(address, new DiscoveredDeviceInfo());
-        discoveredDevices.Add(discoveredDevice.Key, discoveredDevice.Value);
+        if (classOfDevice.Contains(AudioDevicesClass))
+        {
+            var discoveredAudioDevice = new KeyValuePair<long, DiscoveredAudioDeviceInfo>(address, new DiscoveredAudioDeviceInfo());
+            discoveredAudioDevices.Add(discoveredAudioDevice.Key, discoveredAudioDevice.Value);
+
+            Debug.LogWarning($"Found audio device with address: {address.ToString("X12")}, audio devices count: {discoveredAudioDevices.Count}");
+        }
 
         //deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
     }
@@ -134,11 +139,13 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.Log($"DiscoveringCompleted, Error: {error.ToString("X8")}");
 
         //Task.Run(() => ConnectToDevice(radio));
+
+
     }
 
     private async void ConnectToDevice(wclBluetoothRadio radio)
     {
-        if (discoveredDevices.Count == 0)
+        if (discoveredAudioDevices.Count == 0)
         {
             Debug.Log($"There are no devices discovered!");
             return;
@@ -146,8 +153,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         await Task.WhenAll(deviceUpdateTasks);
 
-        var audioDevices = discoveredDevices
-            .Where(x => x.Value.ClassOfDevice.Contains(AudioDevicesClass) && x.Value.Services != null)
+        var audioDevices = discoveredAudioDevices
+            .Where(x => x.Value.Services != null)
             .ToList();
 
         foreach (var audioDevice in audioDevices)
@@ -156,7 +163,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         }
 
         var closestAudioDevice = audioDevices.OrderByDescending(x => x.Value.RSSI).FirstOrDefault();
-        if (!closestAudioDevice.Equals(default(KeyValuePair<long, DiscoveredDeviceInfo>)))
+        if (!closestAudioDevice.Equals(default(KeyValuePair<long, DiscoveredAudioDeviceInfo>)))
         {
             Debug.LogWarning($"ClosestAudioDevice Audio device: {closestAudioDevice.Value.DeviceName}");
 
@@ -190,30 +197,19 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.LogWarning($"Connection to service: {service.Name}, channel: {service.Channel} result: {connectionResult.ToString("X8")}");
     }
 
-    private void UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredDeviceInfo discoveredDeviceInfo)
+    private void UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredAudioDeviceInfo discoveredAudioDeviceInfo)
     {
-        Debug.Log($"Start updating device info!");
-        radio.GetRemoteCod(deviceAddress, out var remoteClassOfDevice);
-        discoveredDeviceInfo.ClassOfDevice = remoteClassOfDevice.ToString("x8");
+        radio.GetRemoteName(deviceAddress, out var deviceName);
+        discoveredAudioDeviceInfo.DeviceName = deviceName;
 
-        if (discoveredDeviceInfo.ClassOfDevice.Contains(AudioDevicesClass))
-        {
-            radio.GetRemoteName(deviceAddress, out var deviceName);
-            discoveredDeviceInfo.DeviceName = deviceName;
+        radio.GetRemoteRssi(deviceAddress, out var rssi);
+        discoveredAudioDeviceInfo.RSSI = rssi;
 
-            radio.GetRemoteRssi(deviceAddress, out var rssi);
-            discoveredDeviceInfo.RSSI = rssi;
+        Guid g = Guid.Empty;
+        radio.EnumRemoteServices(deviceAddress, g, out var services);
+        discoveredAudioDeviceInfo.Services = services;
 
-            Guid g = Guid.Empty;
-            radio.EnumRemoteServices(deviceAddress, g, out var services);
-            discoveredDeviceInfo.Services = services;
-
-            Debug.LogWarning($"Device info updated for {deviceName} ClassOfDevice: {discoveredDeviceInfo.ClassOfDevice}, RSSI: {discoveredDeviceInfo.RSSI} services: {services}");
-        }
-        else
-        {
-            Debug.LogWarning($"Non-relevant Class of Device!");
-        }
+        Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} services: {services}");
     }
 
     private void PowerStateChangedHandler(object Sender, wclPowerState State)
@@ -245,13 +241,11 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     }
 }
 
-internal class DiscoveredDeviceInfo
+internal class DiscoveredAudioDeviceInfo
 {
     public string DeviceName { get; set; }
 
     public wclBluetoothService[] Services { get; set; }
-
-    public string ClassOfDevice { get; set; }
 
     public int RSSI { get; set; }
 }
