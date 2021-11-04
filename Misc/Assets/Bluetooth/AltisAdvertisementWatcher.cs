@@ -12,24 +12,32 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private const string AudioDevicesClass = "2404";
 
     private wclBluetoothManager bluetoothManager;
+    private wclPowerEventsMonitor FPowerMonitor;
+
     private Dictionary<long, DiscoveredDeviceInfo> discoveredDevices = new Dictionary<long, DiscoveredDeviceInfo>();
     private List<Task> deviceUpdateTasks = new List<Task>();
     private List<wclRfCommClient> clients = new List<wclRfCommClient>();
     private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 
+    private Boolean WasOpened = false;
+
     private void Start()
     {
         bluetoothManager = new wclBluetoothManager();
 
-        bluetoothManager.OnPinRequest += PinRequestHandler;
-        bluetoothManager.OnPasskeyRequest += PasskeyRequestHandler;
         bluetoothManager.OnNumericComparison += NumericComparisonHandler;
-        bluetoothManager.OnIoCapabilityRequest += IoCapabilityRequestHandler;
-        bluetoothManager.OnDeviceFound += DeviceFoundHandler;
-        bluetoothManager.OnDiscoveringCompleted += DiscoveringCompletedHandler;
+        bluetoothManager.OnPasskeyRequest += PasskeyRequestHandler;
+        bluetoothManager.OnPinRequest += PinRequestHandler;
         bluetoothManager.OnConfirm += ConfirmHandler;
+        bluetoothManager.OnIoCapabilityRequest += IoCapabilityRequestHandler;
         bluetoothManager.OnOobDataRequest += OobDataRequestHandler;
         bluetoothManager.OnProtectionLevelRequest += ProtectionLevelRequestHandler;
+        bluetoothManager.OnDeviceFound += DeviceFoundHandler;
+        bluetoothManager.OnDiscoveringCompleted += DiscoveringCompletedHandler;
+
+        FPowerMonitor = new wclPowerEventsMonitor();
+        FPowerMonitor.OnPowerStateChanged += PowerStateChangedHandler;
+        FPowerMonitor.Open();
 
         var openResult = bluetoothManager.Open();
         if (openResult != wclErrors.WCL_E_SUCCESS)
@@ -39,7 +47,9 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         bluetoothManager.GetRadio(out var bluetoothRadio);
 
-        bluetoothRadio.Discover(50, wclBluetoothDiscoverKind.dkClassic);
+        Int32 Res = bluetoothRadio.Discover(Convert.ToByte(50), wclBluetoothDiscoverKind.dkClassic);
+        if (Res != wclErrors.WCL_E_SUCCESS)
+            Debug.LogError(Res);
     }
 
     private void OnDisable()
@@ -57,7 +67,13 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             }
         });
 
-        bluetoothManager.Close();
+        Int32 Res = bluetoothManager.Close();
+        if (Res != wclErrors.WCL_E_SUCCESS)
+            Debug.LogError(Res);
+        bluetoothManager = null;
+
+        FPowerMonitor.Close();
+        FPowerMonitor = null;
 
     }
 
@@ -94,7 +110,6 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private void IoCapabilityRequestHandler(object Sender, wclBluetoothRadio Radio, long Address, out wclBluetoothMitmProtection Mitm, out wclBluetoothIoCapability IoCapability, out bool OobPresent)
     {
-        Debug.LogWarning($"IoCapabilityRequestHandler!!!!!!!!!!!!!!!!!");
         Mitm = wclBluetoothMitmProtection.mitmProtectionNotRequiredBonding;
         IoCapability = wclBluetoothIoCapability.iocapDisplayYesNo;
 
@@ -105,16 +120,21 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private void DeviceFoundHandler(object sender, wclBluetoothRadio radio, long address)
     {
         Debug.Log($"Found device with address: {address.ToString("X12")}");
+
         var discoveredDevice = new KeyValuePair<long, DiscoveredDeviceInfo>(address, new DiscoveredDeviceInfo());
         discoveredDevices.Add(discoveredDevice.Key, discoveredDevice.Value);
-        deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
+
+        radio.GetRemoteCod(address, out var remoteClassOfDevice);
+        discoveredDevice.Value.ClassOfDevice = remoteClassOfDevice.ToString("x8");
+        Debug.Log($"Device class with address {address.ToString("X12")} : {remoteClassOfDevice.ToString("x8")}");
+        //deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
     {
-        Debug.Log($"Radio: {radio} DiscoveringCompleted, Error: {error.ToString()}");
+        Debug.Log($"DiscoveringCompleted, Error: {error.ToString()}");
 
-        Task.Run(() => ConnectToDevice(radio));
+        //Task.Run(() => ConnectToDevice(radio));
     }
 
     private async void ConnectToDevice(wclBluetoothRadio radio)
@@ -194,6 +214,34 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         else
         {
             Debug.LogWarning($"Non-relevant Class of Device!");
+        }
+    }
+
+    private void PowerStateChangedHandler(object Sender, wclPowerState State)
+    {
+        switch (State)
+        {
+            case wclPowerState.psResumeAutomatic:
+                if (WasOpened)
+                {
+                    WasOpened = false;
+                    bluetoothManager.Open();
+                }
+                break;
+
+            case wclPowerState.psResume:
+                break;
+
+            case wclPowerState.psSuspend:
+                if (bluetoothManager.Active)
+                {
+                    WasOpened = true;
+                    bluetoothManager.Close();
+                }
+                break;
+
+            case wclPowerState.psUnknown:
+                break;
         }
     }
 }
