@@ -117,6 +117,15 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         OobPresent = false;
     }
 
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.Space))
+        {
+            Debug.LogWarning($"Cancel!");
+            cancellationTokenSource.Cancel();
+        }
+    }
+
     private void DeviceFoundHandler(object sender, wclBluetoothRadio radio, long address)
     {
         radio.GetRemoteCod(address, out var remoteClassOfDevice);
@@ -128,10 +137,72 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             var discoveredAudioDevice = new KeyValuePair<long, DiscoveredAudioDeviceInfo>(address, new DiscoveredAudioDeviceInfo());
             discoveredAudioDevices.Add(discoveredAudioDevice.Key, discoveredAudioDevice.Value);
 
+            Task.Run(() => UpdateDeviceInfo(radio, discoveredAudioDevice.Key, discoveredAudioDevice.Value), cancellationTokenSource.Token);
+
             Debug.LogWarning($"Found audio device with address: {address.ToString("X12")}, audio devices count: {discoveredAudioDevices.Count}");
         }
 
         //deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
+    }
+
+    private async Task UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredAudioDeviceInfo discoveredAudioDeviceInfo)
+    {
+        radio.GetRemoteName(deviceAddress, out var deviceName);
+        discoveredAudioDeviceInfo.DeviceName = deviceName;
+        Debug.Log($"GetRemoteName {deviceName}!");
+
+        if (cancellationTokenSource.IsCancellationRequested)
+        {
+            Debug.LogWarning($"UpdateDeviceInfo Cancel!");
+
+            return;
+        }
+
+        radio.GetRemoteRssi(deviceAddress, out var rssi);
+        discoveredAudioDeviceInfo.RSSI = rssi;
+        Debug.Log($"GetRemoteRssi {rssi}!");
+
+        if (cancellationTokenSource.IsCancellationRequested)
+        {
+            Debug.LogWarning($"UpdateDeviceInfo Cancel!");
+
+            return;
+        }
+
+        radio.IsRemoteDeviceInRange(deviceAddress, out var isInRange);
+        discoveredAudioDeviceInfo.IsInRange = isInRange;
+        Debug.Log($"IsRemoteDeviceInRange {isInRange}!");
+
+        if (cancellationTokenSource.IsCancellationRequested)
+        {
+            Debug.LogWarning($"UpdateDeviceInfo Cancel!");
+
+            return;
+        }
+
+        Guid g = Guid.Empty;
+        radio.EnumRemoteServices(deviceAddress, g, out var services);
+        discoveredAudioDeviceInfo.Services = services;
+        Debug.Log($"EnumRemoteServices {services}!");
+
+        if (cancellationTokenSource.IsCancellationRequested)
+        {
+            Debug.LogWarning($"UpdateDeviceInfo Cancel!");
+
+            return;
+        }
+
+        Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} services: {services}");
+        await Task.Delay(TimeSpan.FromSeconds(3), cancellationTokenSource.Token).ContinueWith(tsk => {});
+
+        if (cancellationTokenSource.IsCancellationRequested)
+        {
+            Debug.LogWarning($"UpdateDeviceInfo Cancel!");
+
+            return;
+        }
+
+        await UpdateDeviceInfo(radio, deviceAddress, discoveredAudioDeviceInfo);
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
@@ -197,21 +268,6 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Debug.LogWarning($"Connection to service: {service.Name}, channel: {service.Channel} result: {connectionResult.ToString("X8")}");
     }
 
-    private void UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredAudioDeviceInfo discoveredAudioDeviceInfo)
-    {
-        radio.GetRemoteName(deviceAddress, out var deviceName);
-        discoveredAudioDeviceInfo.DeviceName = deviceName;
-
-        radio.GetRemoteRssi(deviceAddress, out var rssi);
-        discoveredAudioDeviceInfo.RSSI = rssi;
-
-        Guid g = Guid.Empty;
-        radio.EnumRemoteServices(deviceAddress, g, out var services);
-        discoveredAudioDeviceInfo.Services = services;
-
-        Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} services: {services}");
-    }
-
     private void PowerStateChangedHandler(object Sender, wclPowerState State)
     {
         switch (State)
@@ -248,4 +304,6 @@ internal class DiscoveredAudioDeviceInfo
     public wclBluetoothService[] Services { get; set; }
 
     public int RSSI { get; set; }
+
+    public bool IsInRange { get; set; }
 }
