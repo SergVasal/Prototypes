@@ -59,13 +59,13 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         cancellationTokenSource.Cancel();
         cancellationTokenSource.Dispose();
 
-        Task.Run(() =>
-        {
-            foreach (var client in clients)
-            {
-                client.Disconnect();
-            }
-        });
+        // Task.Run(() =>
+        // {
+        //     foreach (var client in clients)
+        //     {
+        //         client.Disconnect();
+        //     }
+        // });
 
         Int32 Res = bluetoothManager.Close();
         if (Res != wclErrors.WCL_E_SUCCESS)
@@ -160,7 +160,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         radio.GetRemoteRssi(deviceAddress, out var rssi);
         discoveredAudioDeviceInfo.RSSI = rssi;
-        Debug.Log($"GetRemoteRssi {rssi}!");
+        Debug.Log($"GetRemoteRssi {rssi} deviceName: {deviceName}!");
 
         if (cancellationTokenSource.IsCancellationRequested)
         {
@@ -171,7 +171,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         radio.IsRemoteDeviceInRange(deviceAddress, out var isInRange);
         discoveredAudioDeviceInfo.IsInRange = isInRange;
-        Debug.Log($"IsRemoteDeviceInRange {isInRange}!");
+        Debug.Log($"IsRemoteDeviceInRange {isInRange}! deviceName: {deviceName}");
 
         if (cancellationTokenSource.IsCancellationRequested)
         {
@@ -183,7 +183,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Guid g = Guid.Empty;
         radio.EnumRemoteServices(deviceAddress, g, out var services);
         discoveredAudioDeviceInfo.Services = services;
-        Debug.Log($"EnumRemoteServices {services}!");
+        Debug.Log($"EnumRemoteServices {services}! deviceName: {deviceName}");
 
         if (cancellationTokenSource.IsCancellationRequested)
         {
