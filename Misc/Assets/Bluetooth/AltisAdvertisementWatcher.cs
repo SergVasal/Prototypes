@@ -15,7 +15,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private wclPowerEventsMonitor FPowerMonitor;
 
     private Dictionary<long, DiscoveredAudioDeviceInfo> discoveredAudioDevices = new Dictionary<long, DiscoveredAudioDeviceInfo>();
-    private List<Task> deviceUpdateTasks = new List<Task>();
+    private KeyValuePair<long, DiscoveredAudioDeviceInfo> selectedDevice;
+
     private List<wclRfCommClient> clients = new List<wclRfCommClient>();
     private CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
 
@@ -137,12 +138,16 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             var discoveredAudioDevice = new KeyValuePair<long, DiscoveredAudioDeviceInfo>(address, new DiscoveredAudioDeviceInfo());
             discoveredAudioDevices.Add(discoveredAudioDevice.Key, discoveredAudioDevice.Value);
 
-            Task.Run(() => UpdateDeviceInfo(radio, discoveredAudioDevice.Key, discoveredAudioDevice.Value), cancellationTokenSource.Token);
+            Task.Run(() => UpdateDeviceInfo(radio, discoveredAudioDevice.Key, discoveredAudioDevice.Value), cancellationTokenSource.Token).ContinueWith(t =>
+            {
+                if (t.Exception != null)
+                {
+                    Debug.LogError(t.Exception);
+                }
+            });
 
             Debug.LogWarning($"Found audio device with address: {address.ToString("X12")}, audio devices count: {discoveredAudioDevices.Count}");
         }
-
-        //deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
     }
 
     private async Task UpdateDeviceInfo(wclBluetoothRadio radio, long deviceAddress, DiscoveredAudioDeviceInfo discoveredAudioDeviceInfo)
@@ -161,6 +166,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         radio.GetRemoteRssi(deviceAddress, out var rssi);
         discoveredAudioDeviceInfo.RSSI = rssi;
         Debug.Log($"GetRemoteRssi {rssi} deviceName: {deviceName}!");
+        UpdateSelectedDevice();
 
         if (cancellationTokenSource.IsCancellationRequested)
         {
@@ -172,6 +178,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         radio.IsRemoteDeviceInRange(deviceAddress, out var isInRange);
         discoveredAudioDeviceInfo.IsInRange = isInRange;
         Debug.Log($"IsRemoteDeviceInRange {isInRange}! deviceName: {deviceName}");
+        UpdateSelectedDevice();
 
         if (cancellationTokenSource.IsCancellationRequested)
         {
@@ -183,6 +190,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         Guid g = Guid.Empty;
         radio.EnumRemoteServices(deviceAddress, g, out var services);
         discoveredAudioDeviceInfo.Services = services;
+        UpdateSelectedDevice();
+
         Debug.Log($"EnumRemoteServices {services}! deviceName: {deviceName}");
 
         if (cancellationTokenSource.IsCancellationRequested)
@@ -192,7 +201,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             return;
         }
 
-        Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} services: {services}");
+        Debug.LogWarning($"Device info updated for {deviceName}, RSSI: {discoveredAudioDeviceInfo.RSSI} isInRange: {isInRange} services: {services}");
         await Task.Delay(TimeSpan.FromSeconds(3), cancellationTokenSource.Token).ContinueWith(tsk => {});
 
         if (cancellationTokenSource.IsCancellationRequested)
@@ -203,6 +212,24 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         }
 
         await UpdateDeviceInfo(radio, deviceAddress, discoveredAudioDeviceInfo);
+    }
+
+    private void UpdateSelectedDevice()
+    {
+        var selectedDevices = discoveredAudioDevices
+            .Where(x => x.Value.Services != null && x.Value.IsInRange)
+            .ToList();
+        Debug.LogWarning($"Selected devices count: {selectedDevices.Count}");
+
+        if (selectedDevices.Count == 0)
+        {
+            selectedDevice = default;
+            Debug.LogWarning($"NO SELECTED DEVICE!");
+            return;
+        }
+
+        var closestAudioDevice = selectedDevices.OrderByDescending(x => x.Value.RSSI).FirstOrDefault();
+        Debug.LogWarning($"CLOSEST AUDIO DEVICE is {closestAudioDevice.Value.DeviceName}");
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
@@ -221,8 +248,6 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             Debug.Log($"There are no devices discovered!");
             return;
         }
-
-        await Task.WhenAll(deviceUpdateTasks);
 
         var audioDevices = discoveredAudioDevices
             .Where(x => x.Value.Services != null)
