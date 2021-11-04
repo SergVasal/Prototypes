@@ -42,14 +42,14 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         var openResult = bluetoothManager.Open();
         if (openResult != wclErrors.WCL_E_SUCCESS)
         {
-            Debug.LogError(openResult);
+            Debug.LogError(openResult.ToString("X8"));
         }
 
         bluetoothManager.GetRadio(out var bluetoothRadio);
 
         Int32 Res = bluetoothRadio.Discover(Convert.ToByte(50), wclBluetoothDiscoverKind.dkClassic);
         if (Res != wclErrors.WCL_E_SUCCESS)
-            Debug.LogError(Res);
+            Debug.LogError(Res.ToString("X8"));
     }
 
     private void OnDisable()
@@ -69,7 +69,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         Int32 Res = bluetoothManager.Close();
         if (Res != wclErrors.WCL_E_SUCCESS)
-            Debug.LogError(Res);
+            Debug.LogError(Res.ToString("X8"));
         bluetoothManager = null;
 
         FPowerMonitor.Close();
@@ -119,20 +119,19 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private void DeviceFoundHandler(object sender, wclBluetoothRadio radio, long address)
     {
-        Debug.Log($"Found device with address: {address.ToString("X12")}");
+        radio.GetRemoteCod(address, out var remoteClassOfDevice);
+        var classOfDevice = remoteClassOfDevice.ToString("x8");
+        Debug.Log($"Found device with address: {address.ToString("X12")}, class of device: {classOfDevice}");
 
         var discoveredDevice = new KeyValuePair<long, DiscoveredDeviceInfo>(address, new DiscoveredDeviceInfo());
         discoveredDevices.Add(discoveredDevice.Key, discoveredDevice.Value);
 
-        radio.GetRemoteCod(address, out var remoteClassOfDevice);
-        discoveredDevice.Value.ClassOfDevice = remoteClassOfDevice.ToString("x8");
-        Debug.Log($"Device class with address {address.ToString("X12")} : {remoteClassOfDevice.ToString("x8")}");
         //deviceUpdateTasks.Add(Task.Run(() => UpdateDeviceInfo(radio, discoveredDevice.Key, discoveredDevice.Value), cancellationTokenSource.Token));
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
     {
-        Debug.Log($"DiscoveringCompleted, Error: {error.ToString()}");
+        Debug.Log($"DiscoveringCompleted, Error: {error.ToString("X8")}");
 
         //Task.Run(() => ConnectToDevice(radio));
     }
