@@ -13,7 +13,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private wclBluetoothManager bluetoothManager;
     private wclBluetoothRadio bluetoothRadio;
-    private wclRfCommClient client;
+    private List<wclRfCommClient> clients = new List<wclRfCommClient>();
 
     private wclPowerEventsMonitor FPowerMonitor;
 
@@ -21,6 +21,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     private KeyValuePair<long, DiscoveredAudioDeviceInfo> selectedDevice;
 
     private CancellationTokenSource updateDevicesCancellationTokenSource = new CancellationTokenSource();
+    private CancellationTokenSource connectToDeviceTokenSource = new CancellationTokenSource();
 
     private Boolean WasOpened = false;
 
@@ -32,6 +33,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         bluetoothManager.OnPasskeyRequest += PasskeyRequestHandler;
         bluetoothManager.OnPinRequest += PinRequestHandler;
         bluetoothManager.OnConfirm += ConfirmHandler;
+        bluetoothManager.OnAuthenticationCompleted += BluetoothManagerOnOnAuthenticationCompleted;
         bluetoothManager.OnIoCapabilityRequest += IoCapabilityRequestHandler;
         bluetoothManager.OnOobDataRequest += OobDataRequestHandler;
         bluetoothManager.OnProtectionLevelRequest += ProtectionLevelRequestHandler;
@@ -41,8 +43,6 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         FPowerMonitor = new wclPowerEventsMonitor();
         FPowerMonitor.OnPowerStateChanged += PowerStateChangedHandler;
         FPowerMonitor.Open();
-
-        client = new wclRfCommClient();
 
         var openResult = bluetoothManager.Open();
         if (openResult != wclErrors.WCL_E_SUCCESS)
@@ -57,6 +57,11 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             Debug.LogError(Res.ToString("X8"));
     }
 
+    private void BluetoothManagerOnOnAuthenticationCompleted(object sender, wclBluetoothRadio radio, long address, int error)
+    {
+        Debug.Log($"Authentication completed. Error: {error.ToString("X8")}");
+    }
+
     private void OnDisable()
     {
         Debug.LogWarning($"Disable!");
@@ -64,8 +69,20 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         updateDevicesCancellationTokenSource.Cancel();
         updateDevicesCancellationTokenSource.Dispose();
 
-        client.Disconnect();
-        client = null;
+        connectToDeviceTokenSource.Cancel();
+        connectToDeviceTokenSource.Dispose();
+
+        foreach (var client in clients)
+        {
+            client.Disconnect();
+        }
+        clients.Clear();
+
+        if (IsSelectedDevicePaired())
+        {
+            var unPairingResult = bluetoothRadio.RemoteUnpair(selectedDevice.Key);
+            Debug.LogError($"Unpairing result of device {selectedDevice.Value.DeviceName} with address {selectedDevice.Key.ToString("X12")}: {unPairingResult.ToString("X8")}");
+        }
 
         Int32 Res = bluetoothManager.Close();
         if (Res != wclErrors.WCL_E_SUCCESS)
@@ -129,7 +146,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             Debug.LogWarning($"Pair key pressed!");
             updateDevicesCancellationTokenSource.Cancel();
             PairWithSelectedDevice();
-            //ConnectToSelectedDevice();
+            //TryInstallDriversForSelectedDeviceServices();
+            //ConnectToServices();
         }
     }
 
@@ -222,6 +240,11 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private void UpdateSelectedDevice()
     {
+        if (updateDevicesCancellationTokenSource.IsCancellationRequested)
+        {
+            return;
+        }
+
         var selectedDevices = discoveredAudioDevices
             .Where(x => x.Value.Services != null && x.Value.IsInRange && x.Value.RSSI > -128)
             .ToList();
@@ -240,69 +263,118 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private void PairWithSelectedDevice()
     {
+        updateDevicesCancellationTokenSource.Cancel();
+
         if (selectedDevice.Equals(default(KeyValuePair<long, DiscoveredAudioDeviceInfo>)))
         {
             Debug.LogError($"NO SELECTED DEVICE TO PAIR WITH!");
             return;
         }
 
-        Debug.LogWarning($"Start pairing with selected device {selectedDevice.Value.DeviceName} with address {selectedDevice.Key}");
+        Debug.LogWarning($"Start new pairing with selected device {selectedDevice.Value.DeviceName} with address {selectedDevice.Key.ToString("X12")}");
 
-        var pairingResult = bluetoothRadio.RemotePair(selectedDevice.Key);
+        var pairingResult = bluetoothRadio.RemotePair(selectedDevice.Key, wclBluetoothPairingMethod.pmClassic);
         if (pairingResult != wclErrors.WCL_E_SUCCESS)
         {
             Debug.LogError($"Error pairing with device. Error code: {pairingResult.ToString("X8")}");
+
+            if (pairingResult.ToString("X8").Contains("00050027"))
+            {
+                Debug.LogWarning($"Trying to unpair device {selectedDevice.Value.DeviceName}");
+                var unPairingResult = bluetoothRadio.RemoteUnpair(selectedDevice.Key);
+                Debug.LogError($"Unpairing result: {unPairingResult.ToString("X8")}");
+
+                Debug.LogWarning($"Now pairing again with device {selectedDevice.Value.DeviceName}...");
+                var anotherPairingResult = bluetoothRadio.RemotePair(selectedDevice.Key, wclBluetoothPairingMethod.pmClassic);
+
+                if (anotherPairingResult != wclErrors.WCL_E_SUCCESS)
+                {
+                    Debug.LogError($"Error pairing with device. Error code: {pairingResult.ToString("X8")}");
+                }
+                else
+                {
+                    Debug.LogError($"Device pairing failed! Check if device is in pairing mode!");
+                }
+            }
         }
         else
         {
-            Debug.Log($"Pairing completed successfully!");
+            Debug.Log($"Pairing completed successfully! Check for authentification! pairing device: {selectedDevice.Value.DeviceName} with address: {selectedDevice.Key} pairingResult: {pairingResult.ToString("X8")}");
         }
     }
 
-    private void ConnectToSelectedDevice()
+    private bool IsSelectedDevicePaired()
     {
-        client.Address = selectedDevice.Key;
-        client.Authentication = true;
-        client.Encryption = false;
-        client.Timeout = 50;
+        var checkPairedResult = bluetoothRadio.GetRemotePaired(selectedDevice.Key, out var paired);
+        if (checkPairedResult != wclErrors.WCL_E_SUCCESS)
+            Debug.LogError($"Error checking if device is paired: {checkPairedResult.ToString("X8")}");
 
-        client.Channel = 0;
-        client.Service = wclUUIDs.SerialPortServiceClass_UUID;
+        return paired;
+    }
 
-        Int32 connectionResult = client.Connect(bluetoothRadio);
-        if (connectionResult != wclErrors.WCL_E_SUCCESS)
+    private void TryInstallDriversForSelectedDeviceServices()
+    {
+        if (selectedDevice.Value.Services == null)
         {
-            Debug.LogError($"Failed to connect to device Error: {connectionResult.ToString("X8")}");
+            Debug.LogError($"Can't install drivers for services. Services are null!");
+            return;
         }
-        else
+
+        foreach (var service in selectedDevice.Value.Services)
         {
-            Debug.Log($"Successfully connected to device {selectedDevice.Value.DeviceName}");
+            if (connectToDeviceTokenSource.IsCancellationRequested)
+            {
+                Debug.LogError($"TryInstallDriversForSelectedDeviceServices cancelled!");
+                return;
+            }
+
+            var driverInstallResult = bluetoothRadio.InstallDevice(selectedDevice.Key, service.Uuid);
+            Debug.LogWarning($"Driver install for service: {service.Name}, channel: {service.Channel} result: {driverInstallResult.ToString("X8")}");
+        }
+    }
+
+    private void ConnectToServices()
+    {
+        if (selectedDevice.Value.Services == null)
+        {
+            Debug.LogError($"Can't connect to services. Services are null!");
+            return;
+        }
+
+        foreach (var selectedDeviceService in selectedDevice.Value.Services)
+        {
+            if (connectToDeviceTokenSource.IsCancellationRequested)
+            {
+                Debug.LogError($"ConnectToServices cancelled!");
+                return;
+            }
+
+            var client = new wclRfCommClient();
+            clients.Add(client);
+
+            client.Address = selectedDevice.Key;
+            client.Authentication = true;
+            client.Encryption = false;
+            client.Timeout = 50;
+
+            client.Channel = selectedDeviceService.Channel;
+            client.Service = selectedDeviceService.Uuid;
+
+            Int32 connectionResult = client.Connect(bluetoothRadio);
+            if (connectionResult != wclErrors.WCL_E_SUCCESS)
+            {
+                Debug.LogError($"Failed to connect to service Error: {connectionResult.ToString("X8")}");
+            }
+            else
+            {
+                Debug.Log($"Successfully connected to service channel {selectedDeviceService.Channel}, Uuid: {selectedDeviceService.Uuid}");
+            }
         }
     }
 
     private void DiscoveringCompletedHandler(object sender, wclBluetoothRadio radio, int error)
     {
         Debug.Log($"DiscoveringCompleted, Error: {error.ToString("X8")}");
-    }
-
-    private void ConnectToService(wclBluetoothRadio radio, long audioDeviceAddress, wclBluetoothService service)
-    {
-        // var driverInstallResult = radio.InstallDevice(audioDeviceAddress, service.Uuid);
-        // Debug.LogWarning($"Driver install for service: {service.Name}, channel: {service.Channel} result: {driverInstallResult.ToString("X8")}");
-        //
-        // var deviceClient = new wclRfCommClient();
-        // clients.Add(deviceClient);
-        //
-        // deviceClient.Address = audioDeviceAddress;
-        // deviceClient.Authentication = false;
-        // deviceClient.Encryption = false;
-        // deviceClient.Timeout = 20;
-        //
-        // deviceClient.Channel = service.Channel;
-        // deviceClient.Service = service.Uuid;
-        //
-        // var connectionResult = deviceClient.Connect(radio);
-        // Debug.LogWarning($"Connection to service: {service.Name}, channel: {service.Channel} result: {connectionResult.ToString("X8")}");
     }
 
     private void PowerStateChangedHandler(object Sender, wclPowerState State)
