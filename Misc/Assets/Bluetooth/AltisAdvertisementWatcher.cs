@@ -66,6 +66,20 @@ public class AltisAdvertisementWatcher : MonoBehaviour
     {
         Debug.LogWarning($"Disable!");
 
+        bluetoothManager.OnNumericComparison -= NumericComparisonHandler;
+        bluetoothManager.OnPasskeyRequest -= PasskeyRequestHandler;
+        bluetoothManager.OnPinRequest -= PinRequestHandler;
+        bluetoothManager.OnConfirm -= ConfirmHandler;
+        bluetoothManager.OnAuthenticationCompleted -= BluetoothManagerOnOnAuthenticationCompleted;
+        bluetoothManager.OnIoCapabilityRequest -= IoCapabilityRequestHandler;
+        bluetoothManager.OnOobDataRequest -= OobDataRequestHandler;
+        bluetoothManager.OnProtectionLevelRequest -= ProtectionLevelRequestHandler;
+        bluetoothManager.OnDeviceFound -= DeviceFoundHandler;
+        bluetoothManager.OnDiscoveringCompleted -= DiscoveringCompletedHandler;
+
+
+        FPowerMonitor.OnPowerStateChanged -= PowerStateChangedHandler;
+
         updateDevicesCancellationTokenSource.Cancel();
         updateDevicesCancellationTokenSource.Dispose();
 
@@ -74,7 +88,11 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
         foreach (var client in clients)
         {
+            var driverInstallResult = bluetoothRadio.UninstallDevice(selectedDevice.Key, client.Service);
+            Debug.LogWarning($"Driver uninstall for service: {client.Service}, channel: {client.Channel} result: {driverInstallResult.ToString("X8")}");
+
             client.Disconnect();
+
         }
         clients.Clear();
 
@@ -146,8 +164,8 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             Debug.LogWarning($"Pair key pressed!");
             updateDevicesCancellationTokenSource.Cancel();
             PairWithSelectedDevice();
-            //TryInstallDriversForSelectedDeviceServices();
-            //ConnectToServices();
+            TryInstallDriversForSelectedDeviceServices();
+            ConnectToServices();
         }
     }
 
@@ -277,25 +295,6 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         if (pairingResult != wclErrors.WCL_E_SUCCESS)
         {
             Debug.LogError($"Error pairing with device. Error code: {pairingResult.ToString("X8")}");
-
-            if (pairingResult.ToString("X8").Contains("00050027"))
-            {
-                Debug.LogWarning($"Trying to unpair device {selectedDevice.Value.DeviceName}");
-                var unPairingResult = bluetoothRadio.RemoteUnpair(selectedDevice.Key);
-                Debug.LogError($"Unpairing result: {unPairingResult.ToString("X8")}");
-
-                Debug.LogWarning($"Now pairing again with device {selectedDevice.Value.DeviceName}...");
-                var anotherPairingResult = bluetoothRadio.RemotePair(selectedDevice.Key, wclBluetoothPairingMethod.pmClassic);
-
-                if (anotherPairingResult != wclErrors.WCL_E_SUCCESS)
-                {
-                    Debug.LogError($"Error pairing with device. Error code: {pairingResult.ToString("X8")}");
-                }
-                else
-                {
-                    Debug.LogError($"Device pairing failed! Check if device is in pairing mode!");
-                }
-            }
         }
         else
         {
@@ -309,11 +308,16 @@ public class AltisAdvertisementWatcher : MonoBehaviour
         if (checkPairedResult != wclErrors.WCL_E_SUCCESS)
             Debug.LogError($"Error checking if device is paired: {checkPairedResult.ToString("X8")}");
 
+        Debug.LogWarning($"Selected device paired: {paired}");
         return paired;
     }
 
     private void TryInstallDriversForSelectedDeviceServices()
     {
+        Guid g = Guid.Empty;
+        bluetoothRadio.EnumRemoteServices(selectedDevice.Key, g, out var services);
+        selectedDevice.Value.Services = services;
+
         if (selectedDevice.Value.Services == null)
         {
             Debug.LogError($"Can't install drivers for services. Services are null!");
@@ -335,6 +339,10 @@ public class AltisAdvertisementWatcher : MonoBehaviour
 
     private void ConnectToServices()
     {
+        Guid g = Guid.Empty;
+        bluetoothRadio.EnumRemoteServices(selectedDevice.Key, g, out var services);
+        selectedDevice.Value.Services = services;
+
         if (selectedDevice.Value.Services == null)
         {
             Debug.LogError($"Can't connect to services. Services are null!");
@@ -353,7 +361,7 @@ public class AltisAdvertisementWatcher : MonoBehaviour
             clients.Add(client);
 
             client.Address = selectedDevice.Key;
-            client.Authentication = true;
+            client.Authentication = false;
             client.Encryption = false;
             client.Timeout = 50;
 
