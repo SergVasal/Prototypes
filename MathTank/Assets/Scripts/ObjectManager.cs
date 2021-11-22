@@ -8,10 +8,14 @@ namespace DefaultNamespace
         [SerializeField]
         private GameObject objectPrefab;
 
-        private void Start()
+        public Vector3 ObjPosition { get; private set; }
+
+        private void Awake()
         {
             var obj = Instantiate(objectPrefab, new Vector3(Random.Range(-100, 100), Random.Range(-100, 100), objectPrefab.transform.position.z), Quaternion.identity);
-            Debug.Log($"Fuel location: {obj.transform.position}");
+            var position = obj.transform.position;
+            //Debug.Log($"Fuel location: {position}");
+            ObjPosition = position;
         }
     }
 }
