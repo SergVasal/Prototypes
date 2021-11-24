@@ -35,6 +35,25 @@ namespace DefaultNamespace
             return Mathf.Acos(dot / distancesMultiplied);
         }
 
+        public static Coords Translate(Coords position, Coords facing, Coords vector)
+        {
+            if (Distance(new Coords(0, 0, 0), vector) <= 0)
+            {
+                return position;
+            }
+
+            float angle = Angle(vector, facing);
+            float worldAngle = Angle(vector, new Coords(0, 1, 0));
+            bool clockwise = Cross(vector, facing).z < 0;
+
+            vector = Rotate(vector, angle + worldAngle, clockwise);
+
+            float xVal = position.x + vector.x;
+            float yVal = position.y + vector.y;
+            float zVal = position.z + vector.z;
+            return new Coords(xVal, yVal, zVal);
+        }
+
         public static Coords Rotate(Coords vector, float angle, bool clockwise)
         {
             if (clockwise)
