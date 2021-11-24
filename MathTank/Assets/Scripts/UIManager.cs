@@ -28,7 +28,18 @@ namespace DefaultNamespace
 
         public void AddEnergy(string amount)
         {
-            energyAmount.text = amount;
+            float n;
+            if (float.TryParse(amount, out n))
+            {
+                energyAmount.text = amount;
+            }
+        }
+
+        public void SetRotation(string amount)
+        {
+            var rotation = float.Parse(amount) * Mathf.Deg2Rad;
+            tank.transform.up = new Vector3(0f, 1f, 0f);
+            tank.transform.up = HolisticMath.Rotate(new Coords(tank.transform.up), rotation, false).ToVector();
         }
     }
 }
