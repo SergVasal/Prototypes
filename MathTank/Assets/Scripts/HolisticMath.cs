@@ -34,5 +34,31 @@ namespace DefaultNamespace
             var distancesMultiplied = Distance(new Coords(0f, 0f, 0f), vector1) * Distance(new Coords(0f, 0f, 0f), vector2);
             return Mathf.Acos(dot / distancesMultiplied);
         }
+
+        public static Coords Rotate(Coords vector, float angle, bool clockwise)
+        {
+            if (clockwise)
+            {
+                angle = 2 * Mathf.PI - angle;
+            }
+
+            float xVal = vector.x * Mathf.Cos(angle) - vector.y * Mathf.Sin(angle);
+            float yVal = vector.x * Mathf.Sin(angle) + vector.y * Mathf.Cos(angle);
+            return new Coords(xVal, yVal, 0);
+        }
+
+        public static Coords Cross(Coords vector1, Coords vector2)
+        {
+            return new Coords(vector1.y * vector2.z - vector1.z * vector2.y, vector1.z * vector2.x - vector1.x * vector2.z, vector1.x * vector2.y - vector1.y * vector2.x);
+        }
+
+        public static Coords LookAt2D(Coords forwardVector, Coords position, Coords focusPoint)
+        {
+            Coords direction = new Coords(focusPoint.x - position.x, focusPoint.y - position.y, position.z);
+            var angle = Angle(forwardVector, direction);
+
+            var clockwise = Cross(forwardVector, direction).z < 0;
+            return Rotate(forwardVector, angle, clockwise);
+        }
     }
 }
