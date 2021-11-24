@@ -22,34 +22,9 @@ public class Coords {
         z = _Z;
     }
 
-    public Coords(Vector3 vecpos)
-    {
-        x = vecpos.x;
-        y = vecpos.y;
-        z = vecpos.z;
-    }
-
     public override string ToString()
     {
-        return"(" + x + "," + y + "," + z +")";
-    }
-
-    public Vector3 ToVector()
-    {
-        return new Vector3(x, y, z);
-    }
-
-    static public void DrawLine(Coords startPoint, Coords endPoint, float width, Color colour)
-    {
-        GameObject line = new GameObject("Line_" + startPoint.ToString() + "_" + endPoint.ToString());
-        LineRenderer lineRenderer = line.AddComponent<LineRenderer>();
-        lineRenderer.material = new Material(Shader.Find("Unlit/Color"));
-        lineRenderer.material.color = colour;
-        lineRenderer.positionCount = 2;
-        lineRenderer.SetPosition(0, new Vector3(startPoint.x, startPoint.y, startPoint.z));
-        lineRenderer.SetPosition(1, new Vector3(endPoint.x, endPoint.y, endPoint.z));
-        lineRenderer.startWidth = width;
-        lineRenderer.endWidth = width;
+        return "(" + x + "," + y + "," + z + ")";
     }
 
     static public void DrawPoint(Coords position, float width, Color colour)
@@ -65,4 +40,16 @@ public class Coords {
         lineRenderer.endWidth = width;
     }
 
+    static public void DrawLine(Coords startPos, Coords endPos, float width, Color colour)
+    {
+        GameObject line = new GameObject("Line_" + startPos.ToString() + "_" + endPos.ToString());
+        LineRenderer lineRenderer = line.AddComponent<LineRenderer>();
+        lineRenderer.material = new Material(Shader.Find("Unlit/Color"));
+        lineRenderer.material.color = colour;
+        lineRenderer.positionCount = 2;
+        lineRenderer.SetPosition(0, new Vector3(startPos.x, startPos.y, startPos.z));
+        lineRenderer.SetPosition(1, new Vector3(endPos.x, endPos.y, endPos.z));
+        lineRenderer.startWidth = width;
+        lineRenderer.endWidth = width;
+    }
 }
